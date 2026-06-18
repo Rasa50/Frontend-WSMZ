@@ -13,28 +13,25 @@ interface TrackOrder {
   createdAt: string;
 }
 
-const ONGOING_STATUSES = ['PENDING', 'PROCESSING', 'READY'];
+const TRACKABLE_STATUSES = ['PENDING', 'PROCESSING', 'READY', 'DECLINED'];
 
 const STATUS_LABEL: Record<string, string> = {
   PENDING: 'Menunggu Verifikasi',
   PROCESSING: 'Sedang Dimasak',
   READY: 'Siap Diambil',
+  DECLINED: 'Ditolak',
 };
 
 const STATUS_COLOR: Record<string, string> = {
   PENDING: 'text-red-600 bg-red-50',
   PROCESSING: 'text-amber-600 bg-amber-50',
   READY: 'text-emerald-600 bg-emerald-50',
+  DECLINED: 'text-gray-500 bg-gray-100',
 };
 
 export default function HomePage() {
   const router = useRouter();
   const [showTrack, setShowTrack] = useState(false);
-  const [storeOpen, setStoreOpen] = useState(true);
-
-  useEffect(() => {
-    fetch('/api/restaurant').then(r => r.ok && r.json()).then(d => { if (d) setStoreOpen(d.isOpen); }).catch(() => {});
-  }, []);
   const [searchQuery, setSearchQuery] = useState("");
   const [tracking, setTracking] = useState(false);
   const [trackError, setTrackError] = useState("");
@@ -52,7 +49,7 @@ export default function HomePage() {
       const res = await fetch(`/api/orders?search=${encodeURIComponent(searchQuery)}`);
       if (res.ok) {
         const orders = await res.json();
-        const ongoing = orders.filter((o: TrackOrder) => ONGOING_STATUSES.includes(o.status));
+        const ongoing = orders.filter((o: TrackOrder) => TRACKABLE_STATUSES.includes(o.status));
         if (ongoing.length === 0) {
           setTrackError("Tidak ada pesanan aktif ditemukan. Periksa kembali nomor WhatsApp.");
         } else {
@@ -77,7 +74,7 @@ export default function HomePage() {
       const res = await fetch(`/api/orders?search=${encodeURIComponent(searchQuery)}`);
       if (res.ok) {
         const orders = await res.json();
-        const ongoing = orders.filter((o: TrackOrder) => ONGOING_STATUSES.includes(o.status));
+        const ongoing = orders.filter((o: TrackOrder) => TRACKABLE_STATUSES.includes(o.status));
         setSearchResults(ongoing.length > 0 ? ongoing : null);
         if (ongoing.length === 0) {
           setTrackError("Semua pesanan sudah selesai.");
@@ -119,14 +116,9 @@ export default function HomePage() {
         <div className="w-full space-y-4">
           <button
             onClick={() => router.push('/menu')}
-            disabled={!storeOpen}
-            className={`w-full font-bold py-4 px-6 rounded-2xl shadow-lg transition-all text-lg ${
-              storeOpen
-                ? "bg-red-700 hover:bg-red-800 text-white shadow-red-700/10 active:scale-[0.98]"
-                : "bg-gray-400 text-gray-200 cursor-not-allowed"
-            }`}
+            className="w-full bg-red-700 hover:bg-red-800 text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-red-700/10 active:scale-[0.98] transition-all text-lg"
           >
-            {storeOpen ? "Mulai Pesan" : "🔒 Toko Tutup"}
+            Mulai Pesan
           </button>
 
           <button

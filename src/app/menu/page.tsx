@@ -14,8 +14,17 @@ interface ApiProduct {
 }
 
 interface ToppingSelection {
+  id?: string;
   name: string;
+  price?: number;
   quantity: number;
+}
+
+interface ToppingOption {
+  id: string;
+  name: string;
+  price: number;
+  remaining: number;
 }
 
 interface Customization {
@@ -63,18 +72,7 @@ export default function MenuPage() {
 
   const [products, setProducts] = useState<ApiProduct[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
-  const [toppingOptions, setToppingOptions] = useState<{ name: string; price: number }[]>([]);
-  const [storeOpen, setStoreOpen] = useState(true);
-
-  const fetchStoreStatus = useCallback(async () => {
-    try {
-      const res = await fetch('/api/restaurant');
-      if (res.ok) {
-        const data = await res.json();
-        setStoreOpen(data.isOpen);
-      }
-    } catch {}
-  }, []);
+  const [toppingOptions, setToppingOptions] = useState<ToppingOption[]>([]);
 
   // Seblak customization
   const [customizingItem, setCustomizingItem] = useState<ApiProduct | null>(null);
@@ -92,6 +90,10 @@ export default function MenuPage() {
   const [variantItem, setVariantItem] = useState<ApiProduct | null>(null);
   const [variantQty, setVariantQty] = useState(1);
   const [variantSelections, setVariantSelections] = useState<SelectedVariant[]>([]);
+
+  // Store status
+  const [storeOpen, setStoreOpen] = useState(true);
+  const [storeLoading, setStoreLoading] = useState(true);
 
   // Cart overlay
   const [showCartOverlay, setShowCartOverlay] = useState(false);
@@ -147,8 +149,11 @@ export default function MenuPage() {
     }
     fetchProducts();
     fetchToppings();
-    fetchStoreStatus();
-  }, [fetchProducts, fetchToppings, fetchStoreStatus]);
+    fetch('/api/restaurant')
+      .then(r => r.json())
+      .then(data => { setStoreOpen(data.isOpen); setStoreLoading(false); })
+      .catch(() => setStoreLoading(false));
+  }, [fetchProducts, fetchToppings]);
 
   const saveCart = (newCart: CartItem[]) => {
     setCart(newCart);
@@ -293,14 +298,28 @@ export default function MenuPage() {
   };
 
   const handleToppingQty = (name: string, delta: number) => {
+    const option = toppingOptions.find(t => t.name === name);
+    const maxQty = Math.max(0, option?.remaining ?? 0);
     setCustomization(prev => {
       const existing = prev.toppings.find(t => t.name === name);
       if (existing) {
         const newQty = existing.quantity + delta;
-        if (newQty <= 0) return { ...prev, toppings: prev.toppings.filter(t => t.name !== name) };
-        return { ...prev, toppings: prev.toppings.map(t => t.name === name ? { ...t, quantity: newQty } : t) };
+        const clampedQty = Math.min(newQty, maxQty);
+        if (clampedQty <= 0) return { ...prev, toppings: prev.toppings.filter(t => t.name !== name) };
+        return {
+          ...prev,
+          toppings: prev.toppings.map(t => t.name === name ? {
+            ...t,
+            id: t.id || option?.id,
+            price: t.price ?? option?.price,
+            quantity: clampedQty
+          } : t)
+        };
       }
-      if (delta > 0) return { ...prev, toppings: [...prev.toppings, { name, quantity: 1 }] };
+      if (delta > 0 && maxQty > 0) return {
+        ...prev,
+        toppings: [...prev.toppings, { id: option?.id, name, price: option?.price, quantity: 1 }]
+      };
       return prev;
     });
   };
@@ -373,14 +392,9 @@ export default function MenuPage() {
       </div>
 
       {/* Store Closed Banner */}
-      {!storeOpen && (
-        <div className="sticky top-[114px] z-20 bg-red-600 text-white text-center py-3 px-4 shadow-lg">
-          <div className="flex items-center justify-center space-x-2">
-            <span className="text-lg">🔒</span>
-            <span className="font-black text-xs tracking-wider uppercase">
-              Toko Tutup — Belum bisa order, yah!
-            </span>
-          </div>
+      {!storeLoading && !storeOpen && (
+        <div className="bg-amber-500 text-white text-center py-3 px-4 text-xs font-bold">
+          🕐 Warung sedang tutup. Silakan kembali saat jam operasional.
         </div>
       )}
 
@@ -404,7 +418,6 @@ export default function MenuPage() {
             saveCart={saveCart}
             generateCartId={generateCartId}
             formatPrice={formatPrice}
-            storeOpen={storeOpen}
           />
         ) : (
           <div className="space-y-4">
@@ -427,29 +440,41 @@ export default function MenuPage() {
                       </div>
                     </div>
 
-                    {!storeOpen ? (
-                      <div className="flex items-center space-x-2">
-                        <span className="text-[10px] font-black text-gray-400 bg-gray-100 px-2.5 py-1.5 rounded-full">🔒</span>
-                      </div>
-                    ) : hasVariants ? (
+                    {hasVariants ? (
                       hasVariantInCart ? (
                         <div className="flex items-center space-x-3.5 bg-gray-50 border border-gray-150 rounded-full px-3 py-1.5 shadow-inner">
                           <button onClick={() => handleUpdateCartItemQty(hasVariantInCart.id, -1)} className="w-5 h-5 flex items-center justify-center bg-white border border-gray-200 rounded-full text-gray-500 font-extrabold text-xs active:scale-90">-</button>
                           <span className="text-xs font-black text-gray-800">{hasVariantInCart.quantity}</span>
-                          <button onClick={() => openVariantModal(item)} className="w-5 h-5 flex items-center justify-center bg-red-600 rounded-full text-white font-extrabold text-xs active:scale-90">+</button>
+                          <button onClick={() => openVariantModal(item)} disabled={!storeOpen} className={`rounded-full text-xs font-extrabold active:scale-90 ${
+                            !storeOpen
+                              ? 'w-5 h-5 bg-gray-300 text-gray-500 cursor-not-allowed'
+                              : 'w-5 h-5 bg-red-600 text-white'
+                          }`}>+</button>
                         </div>
                       ) : (
-                        <button onClick={() => openVariantModal(item)} className="w-7.5 h-7.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black rounded-xl flex items-center justify-center shadow shadow-red-600/20 transition-all text-lg">+</button>
+                        <button onClick={() => openVariantModal(item)} disabled={!storeOpen} className={`font-black rounded-xl flex items-center justify-center shadow transition-all text-lg ${
+                          !storeOpen
+                            ? 'w-7.5 h-7.5 bg-gray-300 text-gray-500 cursor-not-allowed'
+                            : 'w-7.5 h-7.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white shadow-red-600/20'
+                        }`}>+</button>
                       )
                     ) : (
                       simpleCount > 0 ? (
                         <div className="flex items-center space-x-3.5 bg-gray-50 border border-gray-150 rounded-full px-3 py-1.5 shadow-inner">
                           <button onClick={() => handleDecreaseSimpleItem(item)} className="w-5 h-5 flex items-center justify-center bg-white border border-gray-200 rounded-full text-gray-500 font-extrabold text-xs active:scale-90">-</button>
                           <span className="text-xs font-black text-gray-800">{simpleCount}</span>
-                          <button onClick={() => handleAddSimpleItem(item)} className="w-5 h-5 flex items-center justify-center bg-red-600 rounded-full text-white font-extrabold text-xs active:scale-90">+</button>
+                          <button onClick={() => handleAddSimpleItem(item)} disabled={!storeOpen} className={`rounded-full text-xs font-extrabold active:scale-90 ${
+                            !storeOpen
+                              ? 'w-5 h-5 bg-gray-300 text-gray-500 cursor-not-allowed'
+                              : 'w-5 h-5 bg-red-600 text-white'
+                          }`}>+</button>
                         </div>
                       ) : (
-                        <button onClick={() => handleAddSimpleItem(item)} className="w-7.5 h-7.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black rounded-xl flex items-center justify-center shadow shadow-red-600/20 transition-all text-lg">+</button>
+                        <button onClick={() => handleAddSimpleItem(item)} disabled={!storeOpen} className={`font-black rounded-xl flex items-center justify-center shadow transition-all text-lg ${
+                          !storeOpen
+                            ? 'w-7.5 h-7.5 bg-gray-300 text-gray-500 cursor-not-allowed'
+                            : 'w-7.5 h-7.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white shadow-red-600/20'
+                        }`}>+</button>
                       )
                     )}
                   </div>
@@ -460,7 +485,7 @@ export default function MenuPage() {
         )}
       </main>
 
-      {/* Cart Bar */}
+        {/* Cart Bar */}
       {cart.length > 0 && (
         <div className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-100/80 shadow-2xl px-5 py-4 flex items-center justify-between z-40">
           <div onClick={() => setShowCartOverlay(true)} className="flex items-center space-x-3.5 cursor-pointer hover:opacity-90 active:scale-98 transition-all">
@@ -481,12 +506,12 @@ export default function MenuPage() {
             onClick={() => router.push('/cart')}
             disabled={!storeOpen}
             className={`font-black py-3.5 px-7 rounded-2xl flex items-center space-x-2 text-xs uppercase tracking-widest shadow-md transition-all ${
-              storeOpen
-                ? "bg-red-600 hover:bg-red-700 active:scale-98 text-white shadow-red-600/10"
-                : "bg-gray-300 text-gray-500 cursor-not-allowed"
+              !storeOpen
+                ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                : 'bg-red-600 hover:bg-red-700 active:scale-98 text-white shadow-red-600/10'
             }`}
           >
-            <span>{storeOpen ? "Checkout" : "🔒"}</span>
+            <span>{!storeOpen ? 'Toko Tutup' : 'Checkout'}</span>
           </button>
         </div>
       )}
@@ -587,20 +612,26 @@ export default function MenuPage() {
                   {toppingOptions.map((tOpt) => {
                     const selected = customization.toppings.find(t => t.name === tOpt.name);
                     const qty = selected?.quantity || 0;
+                    const soldOut = tOpt.remaining <= 0;
+                    const maxReached = qty >= tOpt.remaining;
                     return (
                       <div key={tOpt.name} className="flex items-center justify-between px-4 py-3.5 border-b border-gray-50 last:border-none">
                         <div>
-                          <p className={`text-xs font-bold ${qty > 0 ? 'text-red-700' : 'text-gray-800'}`}>{tOpt.name}</p>
-                          <p className="text-[10px] text-gray-400 mt-0.5">{formatPrice(tOpt.price)}</p>
+                          <p className={`text-xs font-bold ${qty > 0 ? 'text-red-700' : soldOut ? 'text-gray-400' : 'text-gray-800'}`}>
+                            {tOpt.name} {soldOut && <span className="text-[9px] text-red-500 font-bold">(Habis)</span>}
+                          </p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">{formatPrice(tOpt.price)} {!soldOut && <span className="text-gray-300">· Sisa {tOpt.remaining}</span>}</p>
                         </div>
                         {qty > 0 ? (
                           <div className="flex items-center space-x-2.5 bg-gray-50 border border-gray-150 rounded-full px-2.5 py-1 shadow-inner">
                             <button onClick={() => handleToppingQty(tOpt.name, -1)} className="w-5 h-5 flex items-center justify-center bg-white border border-gray-200 rounded-full text-gray-500 font-extrabold text-xs active:scale-90">-</button>
                             <span className="text-xs font-black text-gray-800 min-w-[16px] text-center">{qty}</span>
-                            <button onClick={() => handleToppingQty(tOpt.name, 1)} className="w-5 h-5 flex items-center justify-center bg-red-600 rounded-full text-white font-extrabold text-xs active:scale-90">+</button>
+                            <button onClick={() => !maxReached && handleToppingQty(tOpt.name, 1)} disabled={maxReached} className={`w-5 h-5 flex items-center justify-center rounded-full text-white font-extrabold text-xs active:scale-90 ${maxReached ? 'bg-gray-300 cursor-not-allowed' : 'bg-red-600'}`}>+</button>
                           </div>
                         ) : (
-                          <button onClick={() => handleToppingQty(tOpt.name, 1)} className="w-7 h-7 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black rounded-xl flex items-center justify-center shadow shadow-red-600/20 transition-all">+</button>
+                          !soldOut && (
+                            <button onClick={() => handleToppingQty(tOpt.name, 1)} className="w-7 h-7 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black rounded-xl flex items-center justify-center shadow shadow-red-600/20 transition-all">+</button>
+                          )
                         )}
                       </div>
                     );
@@ -783,16 +814,8 @@ export default function MenuPage() {
                   <p className="text-sm font-black text-red-600 mt-0.5">{formatPrice(calculateCartTotal())}</p>
                 </div>
               </div>
-              <button
-                onClick={() => router.push('/cart')}
-                disabled={!storeOpen}
-                className={`font-black py-3.5 px-6 rounded-2xl flex items-center space-x-2 text-xs uppercase tracking-widest shadow-md transition-all ${
-                  storeOpen
-                    ? "bg-red-600 hover:bg-red-700 active:scale-98 text-white shadow-red-600/10"
-                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                }`}
-              >
-                <span>{storeOpen ? "Checkout" : "🔒"}</span>
+              <button onClick={() => router.push('/cart')} className="bg-red-600 hover:bg-red-700 active:scale-98 text-white font-black py-3.5 px-6 rounded-2xl flex items-center space-x-2 text-xs uppercase tracking-widest shadow-md shadow-red-600/10 transition-all">
+                <span>Checkout</span>
               </button>
             </div>
           </div>
